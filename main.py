@@ -187,7 +187,6 @@ def main(page: ft.Page):
                 )
 
             for item in data:
-                title = item.get("title")
                 content = item["content"]
                 entry_id = item["id"]
 
