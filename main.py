@@ -3,7 +3,7 @@ import re
 import flet as ft
 import httpx
 
-API_URL = "http://127.0.0.1:8004"
+API_URL = "https://keepy.mooo.com:8443"
 
 URL_RE = re.compile(r'https?://[^\s<>"<>]+')
 
@@ -14,6 +14,8 @@ TEXT = "#202A44"
 MUTED = "#7B8499"
 BORDER = "#E5E9F2"
 
+CONTENT_WIDTH = 620
+
 
 def clean_url(url: str) -> str:
     return url.rstrip(".,!?;:)]}")
@@ -21,6 +23,12 @@ def clean_url(url: str) -> str:
 
 def main(page: ft.Page):
     page.title = "keepy"
+
+    page.window.width = 700
+    page.window.height = 800
+    page.window.min_width = 700
+    page.window.min_height = 600
+
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = BG
     page.padding = 24
@@ -32,6 +40,7 @@ def main(page: ft.Page):
 
     username_input = ft.TextField(
         label="Логин",
+        value="val",
         border_radius=12,
         border_color=BORDER,
         focused_border_color=PRIMARY,
@@ -57,6 +66,7 @@ def main(page: ft.Page):
         multiline=True,
         min_lines=1,
         max_lines=6,
+        expand=True,
         border_radius=12,
         border_color=BORDER,
         focused_border_color=PRIMARY,
@@ -68,16 +78,20 @@ def main(page: ft.Page):
         color=MUTED,
     )
 
-    entries = ft.Column(spacing=6)
-    content_area = ft.Column(
-        spacing=14,
-        width=620,
+    entries = ft.Column(
+        spacing=6,
+        width=CONTENT_WIDTH,
     )
 
+    content_area = ft.Column(
+        spacing=14,
+        width=CONTENT_WIDTH,
+    )
 
     def make_card(content, padding=14):
         return ft.Container(
             content=content,
+            width=CONTENT_WIDTH,
             padding=padding,
             bgcolor=SURFACE,
             border=ft.Border(
@@ -89,11 +103,12 @@ def main(page: ft.Page):
             border_radius=12,
         )
 
-    def make_button(text, icon, handler):
+    def make_button(text, icon, handler, expand=False):
         return ft.Button(
             text,
             icon=icon,
             on_click=handler,
+            expand=expand,
             style=ft.ButtonStyle(
                 bgcolor=PRIMARY,
                 color=SURFACE,
@@ -101,7 +116,6 @@ def main(page: ft.Page):
                 padding=14,
             ),
         )
-
 
     async def request_entries():
         async with httpx.AsyncClient(
@@ -130,6 +144,11 @@ def main(page: ft.Page):
 
     async def on_delete_click(e):
         await delete_entry(e.control.data)
+
+    async def on_refresh_click(e):
+        app_status.value = "Обновляем записи..."
+        page.update()
+        await refresh_entries()
 
     async def refresh_entries():
         try:
@@ -170,31 +189,61 @@ def main(page: ft.Page):
             for item in data:
                 title = item.get("title")
                 content = item["content"]
-                stripped_content = content.strip()
                 entry_id = item["id"]
 
-                if URL_RE.fullmatch(stripped_content):
-                    url = clean_url(stripped_content)
+                matches = list(URL_RE.finditer(content))
 
-                    if title and title.strip():
-                        display_text = title.strip()
-                    else:
-                        display_text = stripped_content
+                if matches:
+                    spans = []
+                    last_end = 0
 
-                    note_text = ft.Text(
-                        spans=[
+                    for match in matches:
+                        # Убираем конечную пунктуацию из URL.
+                        url = clean_url(match.group())
+                        url_end = match.start() + len(url)
+
+                        # Текст перед ссылкой.
+                        if match.start() > last_end:
+                            spans.append(
+                                ft.TextSpan(
+                                    content[last_end : match.start()],
+                                    style=ft.TextStyle(
+                                        color=TEXT,
+                                    ),
+                                )
+                            )
+
+                        # Кликабельная ссылка без подчёркивания.
+                        spans.append(
                             ft.TextSpan(
-                                display_text,
+                                url,
                                 url=url,
                                 style=ft.TextStyle(
                                     color=PRIMARY,
-                                    decoration=(ft.TextDecoration.UNDERLINE),
+                                    decoration=ft.TextDecoration.NONE,
                                 ),
                             )
-                        ],
+                        )
+
+                        last_end = url_end
+
+                    # Текст после последней ссылки.
+                    if last_end < len(content):
+                        spans.append(
+                            ft.TextSpan(
+                                content[last_end:],
+                                style=ft.TextStyle(
+                                    color=TEXT,
+                                ),
+                            )
+                        )
+
+                    note_text = ft.Text(
+                        spans=spans,
                         size=14,
                         selectable=True,
                     )
+
                 else:
                     note_text = ft.Text(
                         content,
@@ -239,7 +288,6 @@ def main(page: ft.Page):
 
         page.update()
 
-
     async def login(e):
         nonlocal credentials
 
@@ -277,7 +325,6 @@ def main(page: ft.Page):
         except httpx.HTTPError as error:
             login_status.value = f"Ошибка подключения: {error}"
             page.update()
-
 
     async def add_entry(e):
         content = (entry_input.value or "").strip()
@@ -336,26 +383,50 @@ def main(page: ft.Page):
                             weight=ft.FontWeight.BOLD,
                             color=TEXT,
                         ),
-                        entry_input,
-                        make_button(
-                            "Добавить",
-                            ft.Icons.ADD_ROUNDED,
-                            add_entry,
+                        ft.Row(
+                            controls=[entry_input],
+                            width=CONTENT_WIDTH - 30,
+                        ),
+                        ft.Row(
+                            controls=[
+                                make_button(
+                                    "Добавить",
+                                    ft.Icons.ADD_ROUNDED,
+                                    add_entry,
+                                    expand=True,
+                                )
+                            ],
+                            width=CONTENT_WIDTH - 30,
                         ),
                         app_status,
                     ],
                     spacing=10,
+                    horizontal_alignment=(ft.CrossAxisAlignment.STRETCH),
+                    width=CONTENT_WIDTH - 30,
                 )
             ),
-            ft.Text(
-                "Записи",
-                size=18,
-                weight=ft.FontWeight.BOLD,
-                color=TEXT,
+            ft.Row(
+                controls=[
+                    ft.Text(
+                        "Записи",
+                        size=18,
+                        weight=ft.FontWeight.BOLD,
+                        color=TEXT,
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.REFRESH_ROUNDED,
+                        icon_color=PRIMARY,
+                        tooltip="Обновить записи",
+                        on_click=on_refresh_click,
+                    ),
+                ],
+                width=CONTENT_WIDTH,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),
             entries,
         ],
         spacing=12,
+        width=CONTENT_WIDTH,
     )
 
     page.add(
@@ -366,7 +437,7 @@ def main(page: ft.Page):
                 weight=ft.FontWeight.BOLD,
                 color=TEXT,
             ),
-            width=620,
+            width=CONTENT_WIDTH,
         ),
         content_area,
     )
